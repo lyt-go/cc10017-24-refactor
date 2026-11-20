@@ -14,6 +14,7 @@ import json
 from datetime import datetime, timedelta
 from typing import Any
 
+from app.lineage_graph import find_node_by_name, lineage_snapshot_store
 from app.store import store
 
 
@@ -528,13 +529,14 @@ class PipelineEngine:
                 })
 
         # 构建边：基于流式血缘记录
+        # 同名节点查找统一走 lineage_graph.find_node_by_name（行序首条匹配的历史口径）
         for row in store.rows("stream_lineage"):
             if row.get("status") == "已生效":
                 upstream_topic = row.get("上游主题")
                 downstream_table = row.get("下游表名")
-                # 查找对应节点id
-                upstream_node = next((n for n in nodes if n["name"] == upstream_topic), None)
-                downstream_node = next((n for n in nodes if n["name"] == downstream_table), None)
+                # 查找对应节点id（统一同名节点口径，避免不同入口分叉）
+                upstream_node = find_node_by_name({"nodes": nodes}, upstream_topic)
+                downstream_node = find_node_by_name({"nodes": nodes}, downstream_table)
                 if upstream_node and downstream_node:
                     edges.append({
                         "from": upstream_node["id"],
@@ -561,6 +563,22 @@ class PipelineEngine:
                     edges.append({"from": topic_nodes[consumed_topic], "to": flink_id, "label": "compute"})
 
         return {"nodes": nodes, "edges": edges}
+
+    # ───────────────────────────────
+    # 血缘图版本快照跨模块交付
+    # ───────────────────────────────
+
+    def current_lineage_snapshot(self) -> dict[str, Any] | None:
+        """工作台/其他链路读取当前血缘图版本快照。"""
+        return lineage_snapshot_store.current_snapshot()
+
+    def deliver_lineage_snapshot_to_dead_letter(self, version: str | None = None) -> dict[str, Any]:
+        """把流式血缘的血缘图版本快照交付给死信处理，并保留当前版本。"""
+        return lineage_snapshot_store.deliver_to_dead_letter(version)
+
+    def dead_letter_lineage_context(self) -> dict[str, Any] | None:
+        """死信处理保留的血缘版本上下文。"""
+        return lineage_snapshot_store.dead_letter_context()
 
     # ───────────────────────────────
     # 链路总览

@@ -113,6 +113,23 @@ def get_full_lineage_graph() -> dict:
     return pipeline_engine.build_full_lineage_graph()
 
 
+@router.get("/lineage-snapshot/current")
+def get_current_lineage_snapshot() -> dict:
+    """工作台同步显示当前血缘图版本快照；关联记录刷新后保持原版本。"""
+    snapshot = pipeline_engine.current_lineage_snapshot()
+    return {
+        "snapshot": snapshot,
+        "dead_letter_context": pipeline_engine.dead_letter_lineage_context(),
+    }
+
+
+@router.post("/lineage-snapshot/deliver-dead-letter")
+def deliver_lineage_snapshot(version: str | None = None) -> ActionResult:
+    """跨模块处理：把血缘图版本快照从流式血缘交付给死信处理，保留当前版本。"""
+    context = pipeline_engine.deliver_lineage_snapshot_to_dead_letter(version)
+    return ActionResult(ok=True, message="血缘图版本快照已交付死信处理", entry=context)
+
+
 @router.get("/overview")
 def get_pipeline_overview() -> dict:
     """数据管道链路总览。"""

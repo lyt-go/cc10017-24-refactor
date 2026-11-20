@@ -1,8 +1,18 @@
-"""流式血缘 DAG 图服务：生成节点、边示例结构与流转规则。"""
+"""流式血缘 DAG 图服务：生成节点、边示例结构与流转规则。
+
+重构后节点过滤、连边与同名节点查找统一收口到 app.lineage_graph，
+本服务只保留登记/动作等业务流转；get_graph/raw_data 的节点与边输出保持历史口径不变。
+"""
 from __future__ import annotations
 
 from typing import Any
 
+from app.lineage_graph import (
+    DEFAULT_VERSION,
+    build_graph,
+    build_version_graph,
+    lineage_snapshot_store,
+)
 from app.store import store
 
 MODULE = "stream_lineage"
@@ -21,15 +31,8 @@ def csv_cell(value: Any) -> str:
 
 class StreamLineageService:
     def get_graph(self) -> dict[str, Any]:
-        rows = store.rows(MODULE)
-        nodes: list[dict] = []
-        edges: list[dict] = []
-        for i, row in enumerate(rows):
-            nodes.append({"id": int(row.get("id", i+1)), "name": str(row.get(list(row.keys())[1] if len(row)>1 else "name", "")), "status": str(row.get("status", STATUS_ORDER[0])),
-                          **{k: row[k] for k in row if k not in ("id","status","pending","abnormal")}})
-        for i in range(len(nodes)-1):
-            edges.append({"from": nodes[i]["id"], "to": nodes[i+1]["id"], "label": "依赖"})
-        return {"nodes": nodes, "edges": edges}
+        """返回与重构前逐字段一致的节点与边（统一构建器口径）。"""
+        return build_graph()
 
     def get_entry(self, entry_id: int) -> dict[str, Any] | None:
         return store.find(MODULE, entry_id)
@@ -62,3 +65,28 @@ class StreamLineageService:
     def raw_data(self) -> tuple[list[dict], list[dict]]:
         g = self.get_graph()
         return g["nodes"], g["edges"]
+
+    # ── 血缘图版本快照 ──
+    def ensure_snapshot(self, version: str | None = None) -> dict[str, Any]:
+        """冻结并返回指定版本（缺省为默认历史版本）的血缘图快照。"""
+        return lineage_snapshot_store.ensure_snapshot(version or DEFAULT_VERSION)
+
+    def list_snapshots(self, version: str | None = None) -> list[dict[str, Any]]:
+        return lineage_snapshot_store.list_snapshots(version)
+
+    def get_snapshot(self, version: str, revision: int | None = None) -> dict[str, Any] | None:
+        return lineage_snapshot_store.get_snapshot(version, revision)
+
+    def current_snapshot(self) -> dict[str, Any] | None:
+        return lineage_snapshot_store.current_snapshot()
+
+    def write_state(self, version: str) -> dict[str, Any] | None:
+        return lineage_snapshot_store.get_write_state(version)
+
+    def compare_snapshot(self, version: str) -> dict[str, Any]:
+        """流式血缘页比较重构前后图：任一历史版本节点与边集合必须相同。"""
+        return lineage_snapshot_store.compare_with_live(version)
+
+    def deliver_snapshot_to_dead_letter(self, version: str | None = None) -> dict[str, Any]:
+        """跨模块把血缘图版本快照从流式血缘交付给死信处理，保留当前版本。"""
+        return lineage_snapshot_store.deliver_to_dead_letter(version)

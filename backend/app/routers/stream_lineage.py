@@ -31,6 +31,45 @@ def get_graph() -> dict[str, Any]:
     return service.get_graph()
 
 
+@router.get("/snapshots")
+def list_snapshots(version: str | None = Query(default=None)) -> dict[str, Any]:
+    """列出血缘图版本快照（可按链路版本过滤），用于回查历史口径。"""
+    items = service.list_snapshots(version)
+    return {"items": items, "total": len(items), "current": service.current_snapshot()}
+
+
+@router.post("/snapshots/freeze")
+def freeze_snapshot(version: str | None = Query(default=None)) -> ActionResult:
+    """冻结血缘图版本快照；同一血缘版本重复构建只会得到同一个快照。"""
+    snapshot = service.ensure_snapshot(version)
+    return ActionResult(ok=True, message=f"血缘版本 {snapshot['version']} 快照已冻结", entry=snapshot)
+
+
+@router.get("/snapshots/{version}/compare")
+def compare_snapshot(version: str) -> dict[str, Any]:
+    """流式血缘页比较重构前后图：节点与边集合必须保持同一历史口径。"""
+    snapshot = service.get_snapshot(version)
+    if snapshot is None:
+        snapshot = service.ensure_snapshot(version)
+    return service.compare_snapshot(version)
+
+
+@router.post("/snapshots/{version}/deliver")
+def deliver_snapshot(version: str) -> ActionResult:
+    """跨模块把血缘图版本快照从流式血缘交付给死信处理，并保留当前版本。"""
+    context = service.deliver_snapshot_to_dead_letter(version)
+    return ActionResult(ok=True, message="血缘图版本快照已交付死信处理", entry=context)
+
+
+@router.get("/snapshots/{version}/write-state")
+def get_write_state(version: str) -> dict[str, Any]:
+    """回查快照写入链路的最后成功位置，验证写入中断后的恢复进度。"""
+    state = service.write_state(version)
+    if state is None:
+        raise HTTPException(status_code=404, detail=f"血缘版本 {version} 暂无快照写入记录")
+    return state
+
+
 @router.get("/export")
 def export_entries() -> StreamingResponse:
     nodes, edges = service.raw_data()

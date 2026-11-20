@@ -28,6 +28,46 @@
         <button v-for="action in actions" :key="action" class="btn" :data-testid="`action-${selectedNode.id}-${action}`" @click="runAction(action, selectedNode)">{{ action }}</button>
       </div>
     </div>
+    <section class="snapshot-panel" data-testid="snapshot-panel">
+      <header class="snapshot-head">
+        <div>
+          <h3>血缘图版本快照</h3>
+          <p class="page-desc">收拢节点过滤、连边与同名节点查找后冻结历史口径；同一血缘版本重复构建只生成一个快照。</p>
+        </div>
+        <div class="page-actions">
+          <button class="btn" type="button" data-testid="freeze-snapshot" @click="freezeSnapshot">冻结当前版本快照</button>
+          <button class="btn" type="button" data-testid="compare-snapshot" @click="compareSnapshot">比较重构前后图</button>
+          <button class="btn" type="button" data-testid="deliver-snapshot" @click="deliverSnapshot">交付死信处理</button>
+        </div>
+      </header>
+      <div v-if="snapshot" class="snapshot-meta">
+        <span data-testid="snapshot-version">血缘版本：{{ snapshot.version }}</span>
+        <span>修订号：{{ snapshot.revision }}</span>
+        <span>节点：{{ snapshot.node_count }}</span>
+        <span>边：{{ snapshot.edge_count }}</span>
+        <span>边顺序口径：{{ snapshot.edge_policy === 'legacy_order' ? '保留旧边顺序' : snapshot.edge_policy }}</span>
+        <span v-if="snapshot.duplicate_names?.length">同名节点：{{ snapshot.duplicate_names.join('、') }}</span>
+      </div>
+      <div v-else class="empty-state">尚未冻结快照，点击「冻结当前版本快照」生成可回查的版本。</div>
+      <table v-if="snapshots.length" class="data-table">
+        <thead><tr><th>版本</th><th>修订号</th><th>节点数</th><th>边数</th><th>边顺序口径</th><th>冻结时间</th></tr></thead>
+        <tbody>
+          <tr v-for="item in snapshots" :key="item.id" :data-testid="`snapshot-row-${item.id}`" :data-version="item.version">
+            <td>{{ item.version }}</td><td>{{ item.revision }}</td><td>{{ item.node_count }}</td>
+            <td>{{ item.edge_count }}</td><td>{{ item.edge_policy === 'legacy_order' ? '保留旧边顺序' : item.edge_policy }}</td>
+            <td>{{ item.frozen_at }}</td>
+          </tr>
+        </tbody>
+      </table>
+      <div v-if="compareResult" class="snapshot-compare" data-testid="snapshot-compare">
+        <dl><dt>节点集合一致</dt><dd data-testid="compare-nodes-equal">{{ compareResult.nodes_equal ? '是' : '否' }}</dd></dl>
+        <dl><dt>边集合一致</dt><dd>{{ compareResult.edges_equal ? '是' : '否' }}</dd></dl>
+        <dl><dt>旧边顺序保留</dt><dd>{{ compareResult.edge_order_preserved ? '是' : '否' }}</dd></dl>
+        <dl><dt>快照/实时节点数</dt><dd>{{ compareResult.node_count_before }} / {{ compareResult.node_count_after }}</dd></dl>
+        <dl><dt>快照/实时边数</dt><dd>{{ compareResult.edge_count_before }} / {{ compareResult.edge_count_after }}</dd></dl>
+      </div>
+      <p v-if="snapshotMessage" class="snapshot-message" data-testid="snapshot-message">{{ snapshotMessage }}</p>
+    </section>
     <div v-if="showCreate" class="modal-backdrop" data-testid="create-modal">
       <form class="modal" @submit.prevent="submitCreate"><h3>登记血缘记录</h3>
         <label v-for="field in columns.slice(0,3)" :key="field" class="create-field"><span>{{ field }}</span><input v-model="createValues[field]" :placeholder="`请输入${field}`" required /></label>
@@ -78,5 +118,83 @@ async function submitCreate() {
   try { const res = await request(ENDPOINT, { method: 'POST', body: JSON.stringify({ values: createValues.value }) }); if(!res.ok) throw new Error('创建失败'); showCreate.value = false; await reload() } catch(e: any) { errorMessage.value = e.message }
 }
 function exportRows() { window.open(`${ENDPOINT}/export`, '_blank') }
-onMounted(reload)
+
+type Snapshot = {
+  id: number
+  version: string
+  revision: number
+  node_count: number
+  edge_count: number
+  edge_policy: string
+  duplicate_names?: string[]
+  frozen_at: string
+}
+type CompareResult = {
+  version: string
+  nodes_equal: boolean
+  edges_equal: boolean
+  edge_order_preserved: boolean
+  node_count_before: number
+  node_count_after: number
+  edge_count_before: number
+  edge_count_after: number
+}
+const snapshot = ref<Snapshot | null>(null)
+const snapshots = ref<Snapshot[]>([])
+const compareResult = ref<CompareResult | null>(null)
+const snapshotMessage = ref('')
+
+async function loadSnapshots() {
+  try {
+    const res = await request(`${ENDPOINT}/snapshots`)
+    if (!res.ok) return
+    const data = await res.json()
+    snapshots.value = data.items ?? []
+    snapshot.value = data.current ?? snapshots.value[0] ?? null
+  } catch {
+    snapshotMessage.value = '快照加载失败'
+  }
+}
+
+async function freezeSnapshot() {
+  snapshotMessage.value = ''
+  try {
+    const res = await request(`${ENDPOINT}/snapshots/freeze?version=v1`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok || !data.ok) throw new Error(data.message || '冻结失败')
+    snapshotMessage.value = data.message
+    await loadSnapshots()
+  } catch (error) {
+    snapshotMessage.value = error instanceof Error ? error.message : '快照冻结失败'
+  }
+}
+
+async function compareSnapshot() {
+  snapshotMessage.value = ''
+  try {
+    const res = await request(`${ENDPOINT}/snapshots/v1/compare`)
+    if (!res.ok) throw new Error('对比失败')
+    const result: CompareResult = await res.json()
+    compareResult.value = result
+    snapshotMessage.value = result.nodes_equal && result.edges_equal
+      ? '重构前后节点与边集合一致，历史口径保持不变'
+      : '检测到节点或边集合差异，请核对历史口径'
+  } catch (error) {
+    snapshotMessage.value = error instanceof Error ? error.message : '快照对比失败'
+  }
+}
+
+async function deliverSnapshot() {
+  snapshotMessage.value = ''
+  try {
+    const res = await request(`${ENDPOINT}/snapshots/v1/deliver`, { method: 'POST' })
+    const data = await res.json()
+    if (!res.ok || !data.ok) throw new Error(data.message || '交付失败')
+    snapshotMessage.value = `已交付死信处理，保留血缘版本 ${data.entry?.snapshot_version ?? 'v1'}`
+  } catch (error) {
+    snapshotMessage.value = error instanceof Error ? error.message : '快照交付失败'
+  }
+}
+
+onMounted(() => { void reload(); void loadSnapshots() })
 </script>

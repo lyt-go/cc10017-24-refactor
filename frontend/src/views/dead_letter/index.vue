@@ -11,6 +11,12 @@
       </div>
     </header>
 
+    <div v-if="lineageContext" class="lineage-banner" data-testid="lineage-context-banner">
+      <span>血缘图版本快照：{{ lineageContext.snapshot_version }}（修订 {{ lineageContext.snapshot_revision }}）</span>
+      <span v-if="lineageContext.delivered_at">交付时间：{{ lineageContext.delivered_at }}</span>
+      <span class="banner-hint">重放目标按该冻结版本判断，关联记录刷新后保持原版本</span>
+    </div>
+
     <div class="stat-row">
       <article v-for="item in stats" :key="item.label" class="stat-card">
         <span class="stat-label">{{ item.label }}</span>
@@ -31,12 +37,14 @@
       <thead>
         <tr>
           <th v-for="column in columns" :key="column">{{ column }}</th>
+          <th>重放目标</th>
           <th>可执行动作</th>
         </tr>
       </thead>
       <tbody>
         <tr v-for="row in rows" :key="String(row.id)" :data-testid="`row-${row.id}`" :data-status="String(row.status)">
           <td v-for="column in columns" :key="column">{{ row[column] ?? '—' }}</td>
+          <td :data-testid="`replay-target-${row.id}`">{{ replayTargetMap[String(row.id)] ?? '—' }}</td>
           <td class="row-actions">
             <button
               v-for="action in actions"
@@ -51,7 +59,7 @@
           </td>
         </tr>
         <tr v-if="!rows.length">
-          <td :colspan="columns.length + 1" class="empty-state">暂无死信处理数据，可先登记死信记录</td>
+          <td :colspan="columns.length + 2" class="empty-state">暂无死信处理数据，可先登记死信记录</td>
         </tr>
       </tbody>
     </table>
@@ -100,6 +108,12 @@ const filterFields = columns.slice(0, 3)
 const showCreate = ref(false)
 const creating = ref(false)
 const createValues = ref<Record<string, string>>({})
+const replayTargetMap = ref<Record<string, string>>({})
+const lineageContext = ref<{
+  snapshot_version: string
+  snapshot_revision: number
+  delivered_at: string | null
+} | null>(null)
 const stats = computed(() => [
   { label: metricNames[0], value: total.value },
   { label: metricNames[1], value: rows.value.filter((row) => row.status === statuses[1]).length },
@@ -168,6 +182,23 @@ async function runAction(action: string, row: Row) {
   }
 }
 
+async function loadReplayTargets() {
+  try {
+    const response = await request(`${ENDPOINT}/replay-targets`)
+    if (!response.ok) return
+    const payload = await response.json()
+    const map: Record<string, string> = {}
+    for (const item of payload.items ?? []) {
+      map[String(item.dead_letter_id)] = item['重放目标'] ?? '无匹配血缘'
+    }
+    replayTargetMap.value = map
+    lineageContext.value = payload.context ?? null
+  } catch {
+    // 快照未就绪时不阻断列表主流程
+    lineageContext.value = null
+  }
+}
+
 async function reload() {
   errorMessage.value = ''
   const query = new URLSearchParams(filters.value as Record<string, string>).toString()
@@ -179,6 +210,7 @@ async function reload() {
     const payload = await response.json()
     rows.value = payload.items ?? []
     total.value = payload.total ?? rows.value.length
+    await loadReplayTargets()
   } catch (error) {
     errorMessage.value = error instanceof Error ? error.message : '死信处理列表读取失败'
   }

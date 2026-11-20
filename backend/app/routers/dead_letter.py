@@ -65,6 +65,29 @@ def export_entries(
         headers={"Content-Disposition": 'attachment; filename="dead_letter.csv"'})
 
 
+@router.get("/lineage-context")
+def get_lineage_context() -> dict:
+    """死信处理当前保留的血缘图版本快照上下文（跨模块交付，保留当前版本）。"""
+    context = service.lineage_context()
+    return {"context": context}
+
+
+@router.get("/replay-targets")
+def list_replay_targets() -> dict:
+    """批量核对死信记录的重放目标，判断口径与重构前保持一致。"""
+    items = service.replay_targets()
+    return {"items": items, "total": len(items), "context": service.lineage_context()}
+
+
+@router.get("/{entry_id}/replay-target")
+def get_replay_target(entry_id: int) -> dict:
+    """核对单条死信记录的重放目标（基于冻结血缘快照的同名节点统一口径）。"""
+    result = service.replay_target_for_entry(entry_id)
+    if result is None:
+        raise HTTPException(status_code=404, detail=f"死信记录 {entry_id} 不存在或已归档")
+    return result
+
+
 @router.get("/{entry_id}", response_model=dict)
 def get_entry(entry_id: int) -> dict:
     """读取单条死信记录明细；不存在时给出可读的错误说明。"""

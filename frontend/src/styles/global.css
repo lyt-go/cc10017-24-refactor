@@ -70,3 +70,18 @@ body { margin: 0; background: #f6f8fb; color: #1f2937; }
 .analysis-chart { display: flex; align-items: flex-end; gap: 8px; height: 160px; padding: 12px 0; }
 .analysis-bar { flex: 1; border-radius: 4px 4px 0 0; background: var(--brand); min-width: 24px; position: relative; transition: height 0.4s; }
 .analysis-bar span { position: absolute; bottom: -20px; left: 50%; transform: translateX(-50%); font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+/* 血缘图版本快照面板 */
+.snapshot-panel { border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-top: 12px; background: #fff; }
+.snapshot-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.snapshot-head h3 { margin: 0 0 4px 0; font-size: 15px; }
+.snapshot-meta { display: flex; flex-wrap: wrap; gap: 12px; margin: 10px 0; font-size: 12px; color: var(--muted); }
+.snapshot-meta span { background: #f1f5f9; border-radius: 4px; padding: 2px 8px; }
+.snapshot-compare { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 8px; margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+.snapshot-compare dt { font-size: 12px; color: var(--muted); }
+.snapshot-compare dd { margin: 2px 0 0 0; font-size: 13px; }
+.snapshot-message { margin-top: 8px; font-size: 12px; color: var(--brand); }
+
+/* 死信处理血缘版本横幅 */
+.lineage-banner { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; font-size: 12px; color: #1e40af; }
+.lineage-banner .banner-hint { color: #3b82f6; }
